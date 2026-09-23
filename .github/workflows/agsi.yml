@@ -1,16 +1,21 @@
-name: AGSI 
+name: AGSI
 
 on:
-  workflow_dispatch:
+workflow_dispatch:
+
 jobs:
-  run:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-      - run: pip install requests
-      - run: python tweet.py
-        env:
-          AGSI_API_KEY: ${{ secrets.AGSI_API_KEY }}
+run:
+runs-on: ubuntu-latest
+
+steps:
+- uses: actions/checkout@v4
+
+- uses: actions/setup-python@v5
+with:
+python-version: "3.12"
+  - run: pip install requests
+  - run: python tweet.py
+env:
+AGSI_API_KEY: ${{ secrets.AGSI_API_KEY }}
+BUFFER_TOKEN: ${{ secrets.BUFFER_TOKEN }}
+BUFFER_CHANNEL_ID: ${{ secrets.BUFFER_CHANNEL_ID }}
