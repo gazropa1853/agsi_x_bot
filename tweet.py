@@ -1,16 +1,40 @@
 import os
 import requests
 
-API_KEY = os.environ["AGSI_API_KEY"]
+token = os.environ["BUFFER_TOKEN"]
+channel_id = os.environ["BUFFER_CHANNEL_ID"]
 
-headers = {
-"x-key": API_KEY
+query = """
+mutation {
+createPost(
+input: {
+text: "Test post from GitHub Actions"
+channelId: "%s"
+schedulingType: automatic
+mode: addToQueue
+}
+) {
+... on PostActionSuccess {
+post {
+id
+}
 }
 
-response = requests.get(
-"https://agsi.gie.eu/api",
-headers=headers
+... on MutationError {
+message
+}
+}
+}
+""" % channel_id
+
+response = requests.post(
+"https://api.buffer.com/graphql",
+headers={
+"Authorization": f"Bearer {token}",
+"Content-Type": "application/json",
+},
+json={"query": query},
 )
 
-print("STATUS:", response.status_code)
-print(response.text[:500])
+print(response.status_code)
+print(response.text)
