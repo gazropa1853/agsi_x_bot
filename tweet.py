@@ -12,5 +12,5 @@ response = requests.get(
 headers=headers
 )
 
-print(response.status_code)
+print("STATUS:", response.status_code)
 print(response.text[:500])
