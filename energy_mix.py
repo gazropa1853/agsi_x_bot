@@ -222,7 +222,7 @@ def make_post(energy, day):
 
     lines.extend([
         "",
-        "Źródło: https://energy-charts.info",
+        "Źródło: https://energy-charts.info/",
         "https://creativecommons.org/licenses/by/4.0/",
         "Obliczenia własne.",
     ])
