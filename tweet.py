@@ -145,13 +145,13 @@ date_display = datetime.strptime(
 
 
 post_text = (
-    f"Stan zatłoczenia magazynów gazu ({date_display}):\n"
-    f"🇪🇺  {eu}  "
-    f"🇩🇪  {de}  "
-    f"🇮🇹  {it}  "
-    f"🇳🇱  {nl}  "
-    f"🇫🇷  {fr}  "
-    f"🇵🇱  {pl}\n"
+    f"Stan zatłoczenia magazynów gazu ({date_display}):\n\n"
+    f"🇪🇺  {eu}\n"
+    f"🇩🇪  {de}\n"
+    f"🇮🇹  {it}\n"
+    f"🇳🇱  {nl}\n"
+    f"🇫🇷  {fr}\n"
+    f"🇵🇱  {pl}\n\n"
     f"Źródło: AGSI"
 )
 
