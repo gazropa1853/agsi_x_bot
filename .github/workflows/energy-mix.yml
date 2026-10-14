@@ -1,0 +1,57 @@
+name: Miks energetyczny Polski
+on:
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: Dodaj post do kolejki Buffera (false = podgląd)
+        type: boolean
+        default: false
+  schedule:
+    - cron: '17 11 * * *'
+permissions:
+  contents: read
+concurrency:
+  group: energy-mix-poland
+  cancel-in-progress: false
+jobs:
+  mix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install requests==2.32.5
+      - name: Wyznacz poprzednią dobę w Polsce
+        id: day
+        run: |
+          python - <<'PY'
+          import os
+          from datetime import datetime, timedelta
+          from zoneinfo import ZoneInfo
+          day = datetime.now(ZoneInfo('Europe/Warsaw')).date() - timedelta(days=1)
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
+              f.write(f'date={day}\n')
+          PY
+      - uses: actions/cache/restore@v4
+        id: state
+        with:
+          path: .mix-state
+          key: energy-mix-v1-${{ steps.day.outputs.date }}
+      - name: Oblicz miks i ewentualnie dodaj do kolejki
+        env:
+          BUFFER_TOKEN: ${{ secrets.BUFFER_TOKEN }}
+          BUFFER_CHANNEL_ID: ${{ secrets.BUFFER_CHANNEL_ID }}
+          MIX_PUBLISH: ${{ github.event_name == 'schedule' || inputs.publish }}
+          MIX_DATE: ${{ steps.day.outputs.date }}
+        run: |
+          if [ "$MIX_PUBLISH" = "true" ]; then
+            python energy_mix.py --date "$MIX_DATE" --publish
+          else
+            python energy_mix.py --date "$MIX_DATE"
+          fi
+      - uses: actions/cache/save@v4
+        if: success() && steps.state.outputs.cache-hit != 'true' && (github.event_name == 'schedule' || inputs.publish)
+        with:
+          path: .mix-state
+          key: energy-mix-v1-${{ steps.day.outputs.date }}
