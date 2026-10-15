@@ -64,6 +64,7 @@ STORAGE_CODES = {
     "BAT",
     "PS",
     "OES",
+    "UES",
 }
 
 REQUIRED = {
