@@ -27,6 +27,8 @@ EIA_URL = (
 
 BUFFER_URL = "https://api.buffer.com/graphql"
 
+EIA_TIMEZONE = "Eastern"
+
 
 # =========================
 # FUEL CATEGORIES
@@ -43,7 +45,6 @@ FUEL_NAMES = {
     "OTH": "Pozostałe",
 }
 
-# Map additional EIA categories
 FUEL_MAPPING = {
     "NG": "NG",
     "NUC": "NUC",
@@ -59,13 +60,19 @@ FUEL_MAPPING = {
     "UNK": "OTH",
 }
 
-# Energy storage excluded from fuel mix
-STORAGE_CODES = {"BAT", "PS", "OES"}
+STORAGE_CODES = {
+    "BAT",
+    "PS",
+    "OES",
+}
 
-# Core categories required for publication
 REQUIRED = {
-    "NG", "NUC", "COL",
-    "WND", "SUN", "WAT"
+    "NG",
+    "NUC",
+    "COL",
+    "WND",
+    "SUN",
+    "WAT",
 }
 
 
@@ -83,33 +90,50 @@ def fetch_latest():
         "api_key": EIA_API_KEY,
         "frequency": "daily",
         "data[0]": "value",
+
         "facets[respondent][]": "US48",
+        "facets[timezone][]": EIA_TIMEZONE,
+
         "start": (
             today - timedelta(days=10)
         ).isoformat(),
+
         "end": (
             today - timedelta(days=1)
         ).isoformat(),
+
         "length": 5000,
+
         "sort[0][column]": "period",
         "sort[0][direction]": "desc",
     }
 
-    print("Connecting to EIA API...")
+    print(
+        "Connecting to EIA API...",
+        flush=True
+    )
 
     response = requests.get(
         EIA_URL,
         params=params,
-        timeout=40
+        timeout=40,
+        headers={
+            "Accept": "application/json"
+        }
     )
 
     print(
         "EIA HTTP status:",
-        response.status_code
+        response.status_code,
+        flush=True
     )
 
     if response.status_code != 200:
-        print(response.text[:1000])
+        print(
+            "EIA response:",
+            response.text[:1500],
+            flush=True
+        )
 
     response.raise_for_status()
 
@@ -120,35 +144,100 @@ def fetch_latest():
             str(payload["error"])
         )
 
-    rows = payload.get(
+    api_response = payload.get(
         "response", {}
-    ).get("data", [])
+    )
 
-    print("Rows received:", len(rows))
+    rows = api_response.get(
+        "data", []
+    )
+
+    print(
+        "Rows received:",
+        len(rows),
+        flush=True
+    )
 
     if not rows:
         raise RuntimeError(
-            "No EIA data returned"
+            "EIA returned no records. "
+            "Check the timezone filter."
+        )
+
+    # =========================
+    # RESPONSE DIAGNOSTICS
+    # =========================
+
+    print(
+        "Sample record:",
+        json.dumps(
+            rows[0],
+            ensure_ascii=False
+        ),
+        flush=True
+    )
+
+    print(
+        "Available fuel types:",
+        sorted({
+            str(row.get("fueltype"))
+            for row in rows
+        }),
+        flush=True
+    )
+
+    print(
+        "Available timezones:",
+        sorted({
+            str(row.get("timezone"))
+            for row in rows
+        }),
+        flush=True
+    )
+
+    total_rows = int(
+        api_response.get(
+            "total", len(rows)
+        )
+    )
+
+    if total_rows > len(rows):
+        raise RuntimeError(
+            "EIA results truncated. "
+            "Pagination required."
         )
 
     by_date = {}
     seen = set()
+    skipped_storage = 0
 
     for row in rows:
 
         if row.get("respondent") != "US48":
             continue
 
-        date = row["period"][:10]
+        row_timezone = row.get("timezone")
+
+        # Validate timezone if this field exists
+        if row_timezone is not None:
+            if row_timezone != EIA_TIMEZONE:
+                continue
+
+        date = str(row["period"])[:10]
         fuel = row.get("fueltype")
 
-        # Storage is excluded
+        # =========================
+        # EXCLUDE STORAGE
+        # =========================
+
         if fuel in STORAGE_CODES:
+            skipped_storage += 1
             continue
 
         if fuel not in FUEL_MAPPING:
             raise RuntimeError(
-                f"Unknown EIA fuel type: {fuel}"
+                f"Unknown EIA fuel type: {fuel}. "
+                "Review before publishing."
             )
 
         raw_value = row.get("value")
@@ -156,24 +245,42 @@ def fetch_latest():
         if raw_value is None:
             continue
 
-        value = Decimal(str(raw_value))
+        value = Decimal(
+            str(raw_value)
+        )
 
         if not value.is_finite():
             raise RuntimeError(
-                "Invalid EIA value"
+                f"Invalid EIA value: {fuel}"
             )
 
         if value < 0:
             raise RuntimeError(
                 f"Negative generation: "
-                f"{fuel}, {date}"
+                f"{fuel} on {date}"
             )
+
+        # =========================
+        # DUPLICATE VALIDATION
+        # =========================
 
         key = (date, fuel)
 
         if key in seen:
+
+            print(
+                "Duplicate record:",
+                json.dumps(
+                    row,
+                    ensure_ascii=False
+                ),
+                flush=True
+            )
+
             raise RuntimeError(
-                f"Duplicate EIA record: {key}"
+                f"Duplicate EIA record: {key}. "
+                "Additional dimensions must "
+                "be verified."
             )
 
         seen.add(key)
@@ -185,11 +292,28 @@ def fetch_latest():
         )
 
         daily[category] = (
-            daily.get(category, Decimal(0))
-            + value
+            daily.get(
+                category,
+                Decimal(0)
+            ) + value
         )
 
-    # Select most recent complete date
+    print(
+        "Excluded storage records:",
+        skipped_storage,
+        flush=True
+    )
+
+    print(
+        "Available dates:",
+        sorted(by_date),
+        flush=True
+    )
+
+    # =========================
+    # SELECT COMPLETE DATE
+    # =========================
+
     for date in sorted(
         by_date,
         reverse=True
@@ -197,16 +321,21 @@ def fetch_latest():
 
         values = by_date[date]
 
-        if not REQUIRED.issubset(
+        missing = REQUIRED - set(
             values.keys()
-        ):
+        )
+
+        if missing:
             print(
-                "Skipping incomplete date:",
-                date
+                f"Skipping {date}. "
+                f"Missing: {sorted(missing)}",
+                flush=True
             )
             continue
 
-        total = sum(values.values())
+        total = sum(
+            values.values()
+        )
 
         if total <= 0:
             continue
@@ -223,13 +352,29 @@ def fetch_latest():
                 f"EIA data too old: {date}"
             )
 
-        print("Selected date:", date)
-        print("Generation:", values)
+        print(
+            "Selected date:",
+            date,
+            flush=True
+        )
+
+        print(
+            "Generation:",
+            values,
+            flush=True
+        )
+
+        print(
+            "Total generation:",
+            total,
+            flush=True
+        )
 
         return date, values
 
     raise RuntimeError(
-        "No complete recent EIA data"
+        "No recent complete EIA dataset. "
+        "Check fuel categories and timezone."
     )
 
 
@@ -240,6 +385,11 @@ def fetch_latest():
 def calculate_percentages(values):
 
     total = sum(values.values())
+
+    if total <= 0:
+        raise RuntimeError(
+            "Total generation must be positive"
+        )
 
     exact = {
         fuel: value * 100 / total
@@ -263,7 +413,8 @@ def calculate_percentages(values):
         exact,
         key=lambda fuel: (
             exact[fuel] - rounded[fuel],
-            exact[fuel]
+            exact[fuel],
+            fuel
         ),
         reverse=True
     )
@@ -271,11 +422,16 @@ def calculate_percentages(values):
     for fuel in ranking[:missing]:
         rounded[fuel] += 1
 
+    if sum(rounded.values()) != 100:
+        raise RuntimeError(
+            "Percentages do not sum to 100"
+        )
+
     return rounded
 
 
 # =========================
-# POST FORMAT
+# CREATE POST
 # =========================
 
 def create_post(date, values):
@@ -308,7 +464,6 @@ def create_post(date, values):
 
         share = shares[fuel]
 
-        # Hide zero-percent categories
         if share == 0:
             continue
 
@@ -326,7 +481,7 @@ def create_post(date, values):
 
     if len(post) > 280:
         raise RuntimeError(
-            "Post exceeds 280 characters"
+            f"Post too long: {len(post)}"
         )
 
     return post
@@ -338,7 +493,6 @@ def create_post(date, values):
 
 def send_to_buffer(post):
 
-    # Encode text safely for GraphQL
     encoded_text = json.dumps(
         post,
         ensure_ascii=False
@@ -384,7 +538,8 @@ def send_to_buffer(post):
 
     print(
         "Buffer HTTP status:",
-        response.status_code
+        response.status_code,
+        flush=True
     )
 
     response.raise_for_status()
@@ -401,16 +556,18 @@ def send_to_buffer(post):
         .get("createPost") or {}
     )
 
-    post_data = action.get("post") or {}
+    post_data = action.get(
+        "post"
+    ) or {}
 
-    post_id = post_data.get("id")
+    post_id = post_data.get(
+        "id"
+    )
 
     if not post_id:
         raise RuntimeError(
             f"Buffer rejected post: {action}"
         )
-
-    print("Buffer post ID:", post_id)
 
     return post_id
 
@@ -421,7 +578,10 @@ def send_to_buffer(post):
 
 def main():
 
-    print("Starting EIA US Mix")
+    print(
+        "Starting EIA US Mix",
+        flush=True
+    )
 
     date, values = fetch_latest()
 
@@ -430,22 +590,27 @@ def main():
         values
     )
 
-    print("\n======================")
-    print("POST")
-    print("======================\n")
+    print("\n====================")
+    print("POST PREVIEW")
+    print("====================\n")
 
     print(post)
 
-    print("\n======================")
+    print("\n====================")
     print("Sending to Buffer...")
 
-    post_id = send_to_buffer(post)
+    post_id = send_to_buffer(
+        post
+    )
 
     print(
         "Successfully added to Buffer queue"
     )
 
-    print("Post ID:", post_id)
+    print(
+        "Buffer post ID:",
+        post_id
+    )
 
 
 if __name__ == "__main__":
