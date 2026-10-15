@@ -29,9 +29,22 @@ def fetch_latest():
         "length": "5000", "sort[0][column]": "period",
         "sort[0][direction]": "desc",
     }
-    resp = requests.get(API_URL, params=params, timeout=40)
-    resp.raise_for_status()
-    payload = resp.json()
+    resp = requests.get(
+    API_URL,
+    params=params,
+    timeout=40,
+    headers={
+        "User-Agent": "Mozilla/5.0",
+        "Accept": "application/json",
+    },
+)
+
+print("EIA HTTP status:", resp.status_code)
+print("Content-Type:", resp.headers.get("Content-Type"))
+print("EIA response:", resp.text[:1500])
+
+resp.raise_for_status()
+payload = resp.json()
     if payload.get("error"):
         raise RuntimeError(f"EIA error: {payload['error']}")
     rows = payload.get("response", {}).get("data", [])
