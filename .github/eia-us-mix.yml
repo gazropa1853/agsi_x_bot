@@ -1,0 +1,41 @@
+name: US Electricity Mix (EIA)
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 11 * * *'  # 11:00 UTC (13:00 summer / 12:00 winter in Poland)
+
+permissions:
+  contents: write
+
+concurrency:
+  group: eia-us-mix
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install requests
+      - name: Fetch EIA and publish to Buffer
+        run: python eia_mix.py
+        env:
+          EIA_API_KEY: ${{ secrets.EIA_API_KEY }}
+          BUFFER_TOKEN: ${{ secrets.BUFFER_TOKEN }}
+          BUFFER_CHANNEL_ID: ${{ secrets.BUFFER_CHANNEL_ID }}
+          DRY_RUN: 'false'
+      - name: Save last queued date
+        run: |
+          if git status --porcelain -- eia_last_published.json | grep -q .; then
+            git config user.name 'github-actions[bot]'
+            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+            git add eia_last_published.json
+            git commit -m 'Record last EIA US mix post'
+            git push
+          fi
