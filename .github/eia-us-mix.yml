@@ -3,7 +3,7 @@ name: US Electricity Mix (EIA)
 on:
   workflow_dispatch:
   schedule:
-    - cron: '0 11 * * *'  # 11:00 UTC (13:00 summer / 12:00 winter in Poland)
+    - cron: '0 08 * * *'  # 11:00 UTC (13:00 summer / 12:00 winter in Poland)
 
 permissions:
   contents: write
